@@ -211,13 +211,17 @@ FROM cash_ledger_entries
 WHERE agente_id IS NOT NULL
 GROUP BY agente_id, currency;
 
--- Saldo total del pool de un proveedor (para reconciliar contra la columna caché):
+-- Saldo NO asignado del pool (lo que el proveedor todavía tiene "en caja
+-- general", sin entregar a ningún agente). Por eso filtra agente_id IS NULL:
+-- las entradas AGENT_ALLOCATION con agente_id ya asignado pertenecen al
+-- saldo DEL AGENTE (ver v_agent_available_balance), no al del pool general.
 CREATE VIEW v_pool_available_balance AS
 SELECT
     cash_pool_id,
     currency,
     SUM(amount_minor) AS available_minor
 FROM cash_ledger_entries
+WHERE agente_id IS NULL
 GROUP BY cash_pool_id, currency;
 
 -- =====================================================================
@@ -227,15 +231,19 @@ GROUP BY cash_pool_id, currency;
 CREATE OR REPLACE FUNCTION refresh_cash_pool_cache(p_cash_pool_id BIGINT)
 RETURNS void AS $$
 BEGIN
+    -- IMPORTANTE: solo cuenta entradas con agente_id IS NULL — el disponible
+    -- del pool es lo NO asignado a ningún agente todavía. Una entrada
+    -- AGENT_ALLOCATION con agente_id set pertenece al saldo del agente, no
+    -- al del pool (ver v_pool_available_balance / v_agent_available_balance).
     UPDATE cash_pools cp
     SET
         available_cup_minor = COALESCE((
             SELECT SUM(amount_minor) FROM cash_ledger_entries
-            WHERE cash_pool_id = p_cash_pool_id AND currency = 'CUP'
+            WHERE cash_pool_id = p_cash_pool_id AND currency = 'CUP' AND agente_id IS NULL
         ), 0),
         available_usd_minor = COALESCE((
             SELECT SUM(amount_minor) FROM cash_ledger_entries
-            WHERE cash_pool_id = p_cash_pool_id AND currency = 'USD'
+            WHERE cash_pool_id = p_cash_pool_id AND currency = 'USD' AND agente_id IS NULL
         ), 0),
         version = version + 1,
         updated_at = now()
