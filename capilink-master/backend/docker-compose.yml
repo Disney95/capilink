@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: capilink
+      POSTGRES_PASSWORD: capilink
+      POSTGRES_DB: capilink
+    ports:
+      - "5432:5432"
+    volumes:
+      - capilink_db_data:/var/lib/postgresql/data
+      - ../schema_postgres.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg2://capilink:capilink@db:5432/capilink
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  capilink_db_data:
