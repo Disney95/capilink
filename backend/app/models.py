@@ -112,6 +112,15 @@ class DistributionOrder(Base):
     assigned_agent_id = Column(BigInteger, ForeignKey("users.id"))
     assigned_at = Column(DateTime(timezone=True))
 
+    # Estado de entrega del SMS con el OTP — independiente del estado de la
+    # orden (ver app/sms). Permite reintentar el envío sin recrear la orden.
+    otp_sms_status = Column(String, nullable=False, default="PENDING")  # PENDING|SENT|FAILED
+    otp_sms_provider = Column(String)
+    otp_sms_message_id = Column(String)
+    otp_sms_error = Column(Text)
+    otp_sms_attempts = Column(Integer, nullable=False, default=0)
+    otp_sms_sent_at = Column(DateTime(timezone=True))
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 

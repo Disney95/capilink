@@ -9,6 +9,8 @@ import hmac
 import secrets
 from datetime import datetime, timedelta, timezone
 
+from .sms import SMSDeliveryError, get_sms_provider
+
 OTP_LENGTH = 6
 OTP_TTL_HOURS = 72
 
@@ -47,8 +49,24 @@ def create_order_otp() -> dict:
     }
 
 
-def send_otp_sms(phone_number: str, otp_plain: str) -> None:
-    """Punto de integración con el proveedor de SMS (Twilio/SNS/similar).
-    Implementación real queda fuera de este esqueleto — aquí solo el contrato."""
-    # TODO: integrar proveedor de SMS real.
-    raise NotImplementedError("Conectar con proveedor de SMS (Twilio/SNS/etc.)")
+def build_otp_message(otp_plain: str) -> str:
+    return (
+        f"CapiLink: tu codigo de entrega es {otp_plain}. "
+        f"Valido por {OTP_TTL_HOURS} horas. No lo compartas por telefono."
+    )
+
+
+def send_otp_sms(phone_number: str, otp_plain: str) -> str:
+    """Envía el OTP en texto plano por SMS a través del proveedor
+    configurado (ver app/config.py: SMS_PROVIDER). Devuelve el id de
+    mensaje del proveedor para trazabilidad.
+
+    Lanza SMSDeliveryError si el envío falla tras agotar los reintentos
+    de aplicación — el llamador decide qué hacer (no bloquear la orden,
+    marcarla para reintento manual, etc.), este servicio no lo decide."""
+    provider = get_sms_provider()
+    message = build_otp_message(otp_plain)
+    try:
+        return provider.send(phone_number, message)
+    except SMSDeliveryError:
+        raise

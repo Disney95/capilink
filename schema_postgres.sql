@@ -127,10 +127,23 @@ CREATE TABLE distribution_orders (
     assigned_agent_id   BIGINT REFERENCES users(id),
     assigned_at         TIMESTAMPTZ,
 
+    -- Estado de entrega del SMS con el OTP (ver otp_service.py / app/sms).
+    -- No confundir con el estado de la orden: un fallo de SMS no bloquea
+    -- la creación de la orden, pero sí debe quedar visible para reintentar.
+    otp_sms_status      TEXT NOT NULL DEFAULT 'PENDING' CHECK (otp_sms_status IN (
+                            'PENDING', 'SENT', 'FAILED'
+                         )),
+    otp_sms_provider    TEXT,             -- 'twilio' | 'console'
+    otp_sms_message_id  TEXT,             -- id devuelto por el proveedor, para trazabilidad
+    otp_sms_error       TEXT,             -- último error, si otp_sms_status = 'FAILED'
+    otp_sms_attempts    INT NOT NULL DEFAULT 0,
+    otp_sms_sent_at     TIMESTAMPTZ,
+
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX idx_orders_status ON distribution_orders(status);
+CREATE INDEX idx_orders_otp_sms_status ON distribution_orders(otp_sms_status) WHERE otp_sms_status = 'FAILED';
 CREATE INDEX idx_orders_agent ON distribution_orders(assigned_agent_id) WHERE assigned_agent_id IS NOT NULL;
 CREATE INDEX idx_orders_municipality ON distribution_orders(municipality);
 

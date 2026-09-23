@@ -20,6 +20,9 @@ class OrderResponse(BaseModel):
     amount_fiat_minor: int
     currency: str
     otp_expires_at: datetime
+    otp_sms_status: str
+    otp_sms_attempts: int
+    otp_sms_error: Optional[str] = None
 
     class Config:
         from_attributes = True

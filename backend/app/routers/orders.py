@@ -5,9 +5,31 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from .. import models, schemas, otp_service, ledger_service
+from ..config import get_settings
 from ..database import get_db
+from ..sms import SMSDeliveryError
 
 router = APIRouter(prefix="/orders", tags=["orders"])
+
+
+def _attempt_send_otp_sms(order: models.DistributionOrder, otp_plain: str, db: Session) -> None:
+    """Envía el SMS y deja el resultado grabado en la orden. Nunca lanza —
+    un fallo de SMS es visible en otp_sms_status, pero no debe tumbar la
+    request que la llamó (creación de orden o reenvío manual)."""
+    order.otp_sms_attempts += 1
+    try:
+        message_id = otp_service.send_otp_sms(order.beneficiario_phone, otp_plain)
+        order.otp_sms_status = "SENT"
+        order.otp_sms_provider = get_settings().sms_provider
+        order.otp_sms_message_id = message_id
+        order.otp_sms_error = None
+        order.otp_sms_sent_at = datetime.now(timezone.utc)
+    except SMSDeliveryError as exc:
+        order.otp_sms_status = "FAILED"
+        order.otp_sms_provider = exc.provider
+        order.otp_sms_error = str(exc)
+    db.commit()
+    db.refresh(order)
 
 
 @router.post("", response_model=schemas.OrderResponse, status_code=201)
@@ -30,13 +52,36 @@ def create_order(payload: schemas.CreateOrderRequest, db: Session = Depends(get_
     db.commit()
     db.refresh(order)
 
-    # Envío de SMS: se hace fuera de la transacción de DB. Si falla, no debe
-    # revertir la creación de la orden — se reintenta el envío por separado.
-    try:
-        otp_service.send_otp_sms(order.beneficiario_phone, otp_data["otp_plain"])
-    except NotImplementedError:
-        pass  # esqueleto: conectar proveedor de SMS real en producción
+    # Envío de SMS: no revierte la creación de la orden si falla — el
+    # resultado queda en otp_sms_status/otp_sms_error para reintentar via
+    # POST /orders/{uuid}/resend-otp sin tener que recrear la orden.
+    _attempt_send_otp_sms(order, otp_data["otp_plain"], db)
 
+    return order
+
+
+@router.post("/{order_uuid}/resend-otp", response_model=schemas.OrderResponse)
+def resend_otp(order_uuid: uuid_lib.UUID, db: Session = Depends(get_db)):
+    """Reintento manual de envío del SMS con el OTP — para cuando el envío
+    original falló (otp_sms_status='FAILED') o el destinatario dice no
+    haberlo recibido. Genera un OTP nuevo (invalida el anterior) porque el
+    texto plano original ya no existe en el servidor — nunca se persiste."""
+    order = db.query(models.DistributionOrder).filter(models.DistributionOrder.uuid == order_uuid).first()
+    if not order:
+        raise HTTPException(404, "Orden no encontrada")
+    if order.status not in ("PENDING", "ASSIGNED"):
+        raise HTTPException(409, f"No se puede reenviar el OTP con la orden en estado {order.status}")
+
+    otp_data = otp_service.create_order_otp()
+    order.otp_hash = otp_data["otp_hash"]
+    order.otp_secret = otp_data["otp_secret"]
+    order.otp_expires_at = otp_data["otp_expires_at"]
+    order.otp_attempts = 0
+    order.otp_locked_at = None
+    db.commit()
+    db.refresh(order)
+
+    _attempt_send_otp_sms(order, otp_data["otp_plain"], db)
     return order
 
 
