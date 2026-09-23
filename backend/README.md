@@ -37,9 +37,14 @@ uvicorn app.main:app --reload
 - `POST /orders` — crea una orden (genera OTP, calcula HMAC, envía SMS).
 - `POST /orders/{uuid}/resend-otp` — reenvía el OTP (genera uno nuevo; útil si el SMS original falló).
 - `POST /orders/{uuid}/assign` — asigna la orden a un agente (valida saldo disponible vía ledger).
+- `POST /orders/{uuid}/cancel` — cancela una orden PENDING o ASSIGNED; si ya estaba ASSIGNED, libera el monto comprometido de vuelta al disponible del agente (busca el `cash_pool_id` real en el ledger, no adivina).
 - `GET /orders/{uuid}` — consulta una orden.
 - `GET /sync/pull/{agent_id}` — el agente descarga sus órdenes asignadas.
 - `POST /sync/push` — el agente sube entregas confirmadas offline (valida firma Ed25519).
+- `POST /collaterals` — el agente bloquea colateral en USDT (estado `LOCKED`) antes de poder operar con efectivo de un proveedor.
+- `POST /collaterals/{uuid}/release` — el proveedor libera el colateral del agente.
+- `POST /collaterals/{uuid}/forfeit` — el proveedor ejecuta el colateral (ej. impago o pérdida del agente); acepta opcionalmente el `tx_hash` del pago on-chain resultante.
+- `GET /collaterals/{uuid}` / `GET /collaterals?agente_id=&status=` — consulta de colaterales.
 - `GET /health` — chequeo de salud.
 
 ## Envío de SMS (OTP)
@@ -74,7 +79,7 @@ inválido, credenciales) fallan de inmediato sin gastar reintentos.
 ## Pendiente para producción (fuera del alcance de este esqueleto)
 
 - Autenticación/autorización (JWT o similar) — ningún endpoint aquí está protegido todavía.
-- Registro de dispositivos (`POST /devices`) — el router de sync asume que el dispositivo ya existe en la tabla `devices`.
-- Endpoints de proveedor (asignar agentes a proveedor, ver colaterales — `crear cash_pool` y `allocate` ya existen).
 - Migraciones con Alembic en vez de aplicar `schema_postgres.sql` a mano.
 - Reenvío automático (job periódico) de OTPs en `otp_sms_status=FAILED` — hoy el reintento es manual vía `/resend-otp`.
+- Tests automatizados (no hay ninguno todavía).
+- Cliente Flutter real (SQLCipher + sync_queue + `device_signature_service.dart`) — hoy solo existen los archivos de referencia sueltos en la raíz del repo, no un proyecto Flutter completo.

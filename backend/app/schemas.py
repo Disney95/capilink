@@ -32,6 +32,10 @@ class AssignOrderRequest(BaseModel):
     agent_id: int
 
 
+class CancelOrderRequest(BaseModel):
+    reason: Optional[str] = None
+
+
 # --- Sincronización ---
 
 class SyncOrderDownloadItem(BaseModel):
@@ -172,3 +176,34 @@ class AgentBalanceResponse(BaseModel):
     agente_id: int
     currency: str
     available_minor: int
+
+
+# --- Colaterales ---
+
+class LockCollateralRequest(BaseModel):
+    agente_id: int
+    proveedor_id: int
+    amount_usdt_minor: int = Field(gt=0)  # USDT con 6 decimales -> x1,000,000
+    chain: Literal["TRC20", "ERC20", "BEP20"] = "TRC20"
+    tx_hash: Optional[str] = None  # tx on-chain del depósito del agente, si ya se conoce
+
+
+class ForfeitCollateralRequest(BaseModel):
+    settlement_tx_hash: Optional[str] = None  # tx on-chain del pago al proveedor, si ya se conoce
+
+
+class CollateralResponse(BaseModel):
+    id: int
+    uuid: uuid.UUID
+    agente_id: int
+    proveedor_id: int
+    amount_usdt_minor: int
+    chain: str
+    status: str
+    tx_hash: Optional[str]
+    locked_at: datetime
+    released_at: Optional[datetime]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

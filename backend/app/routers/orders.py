@@ -128,6 +128,44 @@ def assign_order(order_uuid: uuid_lib.UUID, payload: schemas.AssignOrderRequest,
     return order
 
 
+@router.post("/{order_uuid}/cancel", response_model=schemas.OrderResponse)
+def cancel_order(order_uuid: uuid_lib.UUID, payload: schemas.CancelOrderRequest, db: Session = Depends(get_db)):
+    """Cancela una orden que aún no fue entregada. Si ya estaba ASSIGNED,
+    el monto comprometido (ORDER_COMMITTED) se libera de vuelta al
+    disponible del agente vía ledger_service.release_order_amount — nunca
+    se toca available_* directamente (ver ARCHITECTURE.md §3.1)."""
+    order = db.query(models.DistributionOrder).filter(models.DistributionOrder.uuid == order_uuid).first()
+    if not order:
+        raise HTTPException(404, "Orden no encontrada")
+    if order.status not in ("PENDING", "ASSIGNED"):
+        raise HTTPException(409, f"No se puede cancelar una orden en estado {order.status}")
+
+    if order.status == "ASSIGNED":
+        # El pool a liberar es el mismo que se comprometió al asignar —
+        # se recupera del propio ledger en vez de volver a adivinarlo por
+        # "el pool más reciente", que sería incorrecto si hay varios.
+        committed_entry = (
+            db.query(models.CashLedgerEntry)
+            .filter(
+                models.CashLedgerEntry.order_id == order.id,
+                models.CashLedgerEntry.entry_type == "ORDER_COMMITTED",
+            )
+            .first()
+        )
+        if not committed_entry:
+            raise HTTPException(
+                409,
+                "La orden está ASSIGNED pero no tiene un movimiento ORDER_COMMITTED en el "
+                "ledger — estado inconsistente, revisar manualmente antes de cancelar",
+            )
+        ledger_service.release_order_amount(db, order, cash_pool_id=committed_entry.cash_pool_id)
+
+    order.status = "CANCELLED"
+    db.commit()
+    db.refresh(order)
+    return order
+
+
 @router.get("/{order_uuid}", response_model=schemas.OrderResponse)
 def get_order(order_uuid: uuid_lib.UUID, db: Session = Depends(get_db)):
     order = db.query(models.DistributionOrder).filter(models.DistributionOrder.uuid == order_uuid).first()
